@@ -30,25 +30,20 @@
 % --- Metadata ---
 \title{\textbf{Algoritmo Immunologico per il\\Capacitated Vehicle Routing Problem (CVRP)}}
 \author{%
-    \small Progetto per il corso di\\
-    \small\textit{Heuristics \& Metaheuristics for Optimization \& Learning}\\
-    \small Prof. Mario Pavone\\[4pt]
+    \normalsize Progetto per il corso di\\[2pt]
+    \large\textit{Heuristics \& Metaheuristics for Optimization \& Learning}\\[4pt]
+    \normalsize Prof. Mario Pavone\\[6pt]
+    \normalsize Mattia Campanella \ --- \ Matricola 1000029793
 }
-\date{\small A.A. 2025/2026 --- Luglio 2026}
+\date{\normalsize A.A. 2025/2026 --- Luglio 2026}
 
 \begin{document}
 
 \maketitle
 
-\begin{abstract}
-\noindent
-Il \emph{Capacitated Vehicle Routing Problem} (CVRP) è un problema di ottimizzazione combinatoria NP-hard di rilevanza pratica nella logistica e nei trasporti. In questo lavoro si presenta un \textbf{Algoritmo Immunologico} (IA) ispirato al principio della \textbf{Selezione Clonale} (CLONALG) per la sua risoluzione. L'algoritmo utilizza una codifica a permutazione con l'algoritmo \emph{Split} di Prins (2004) per la decodifica in rotte ammissibili. Sono stati implementati quattro operatori di ipermutazione (swap, inversione, inserzione, scramble) e una ricerca locale 2-opt intra-rotta. Il protocollo sperimentale prevede 5 run per istanza su 10 istanze CVRPLIB (Set A, B, E, P) con un budget di 350.000 valutazioni di fitness. I risultati mostrano che l'algoritmo raggiunge la soluzione ottima nota (BKS) su istanze di piccole dimensioni e ottiene gap inferiori al 5\% sulla maggior parte delle istanze, con un gap massimo dell'11.3\% sull'istanza più complessa E-n101-k14.
-\end{abstract}
+\vspace{1em}
 
-\newpage
-\tableofcontents
-\newpage
-
+\clearpage
 % ============================================================
 \section{Introduzione}
 % ============================================================
@@ -86,55 +81,120 @@ L'algoritmo CLONALG traspone questi meccanismi in un contesto di ottimizzazione:
 
 \subsection{Adattamento al CVRP}
 
-L'adattamento di CLONALG al CVRP richiede una rappresentazione appropriata delle soluzioni e operatori di mutazione efficaci.
+L'adattamento di CLONALG al CVRP richiede scelte progettuali in tre aree: rappresentazione delle soluzioni, meccanismo di clonazione e ipermutazione, e ricerca locale.
 
-\subsubsection{Rappresentazione della Soluzione}
+\subsubsection{Rappresentazione della Soluzione e Algoritmo Split}
 
-Ogni soluzione (anticorpo) è rappresentata come una \textbf{permutazione} dei clienti (senza il deposito). La decodifica in rotte ammissibili è realizzata tramite l'\textbf{algoritmo Split} di Prins (2004), che partiziona ottimamente il giant tour in rotte che rispettano il vincolo di capacità, minimizzando il costo totale tramite programmazione dinamica in $O(n^2)$.
+Ogni soluzione (anticorpo) è rappresentata come una \textbf{permutazione} $\pi = (\pi_1, \pi_2, \dots, \pi_n)$ dei clienti $\{1, \dots, n\}$, senza il deposito. Questa codifica a \emph{giant tour} è il punto di forza dell'approccio: qualunque permutazione dei clienti è una soluzione \emph{potenzialmente} ammissibile, e la decodifica in rotte effettive è demandata all'\textbf{algoritmo Split} di Prins (2004) \cite{prins}.
+
+\paragraph{Algoritmo Split.} Dato il giant tour $\pi$, l'algoritmo Split risolve un problema di cammino minimo su un grafo ausiliario $H = (U, A)$ dove:
+\begin{itemize}
+    \item $U = \{u_0, u_1, \dots, u_n\}$ sono $n+1$ nodi, con $u_0$ corrispondente al deposito.
+    \item Un arco $(u_{i-1}, u_j) \in A$ con peso $w_{ij}$ esiste per ogni coppia $(i, j)$ tale che il sottotour $(\pi_i, \pi_{i+1}, \dots, \pi_j)$ rispetti il vincolo di capacità $\sum_{h=i}^{j} q_{\pi_h} \leq Q$. Il peso è il costo della rotta corrispondente: $w_{ij} = c_{0,\pi_i} + \sum_{h=i}^{j-1} c_{\pi_h, \pi_{h+1}} + c_{\pi_j, 0}$.
+\end{itemize}
+Il cammino di costo minimo da $u_0$ a $u_n$ in $H$ individua la partizione ottima del giant tour in rotte ammissibili. Prins dimostra che questo cammino può essere trovato in $O(n^2)$ tramite programmazione dinamica, il che rende la decodifica efficiente anche per istanze di grandi dimensioni.
+
+La scelta di questa codifica è motivata da tre vantaggi: (1) \emph{ammissibilità garantita} --- ogni soluzione decodificata soddisfa per costruzione i vincoli di capacità; (2) \emph{ottimalità della partizione} --- per un dato ordinamento dei clienti, Split trova la migliore suddivisione in rotte possibile; (3) \emph{semplicità degli operatori} --- gli operatori di mutazione lavorano su semplici array di interi, senza dover gestire strutture di rotte complesse.
+
+\subsubsection{Clonazione Proporzionale all'Affinità}
+
+Ad ogni generazione, vengono selezionati i migliori $n_{\text{sel}} = \lfloor \beta N \rfloor$ anticorpi della popolazione (con $\beta = 0.2$, ovvero il 20\% della popolazione). Per ogni anticorpo selezionato con rank $r$ (dove $r = 1$ indica il migliore), il numero di cloni generati è:
+
+\begin{equation}
+    n_{\text{cloni}}(r) = \max\!\left(1,\ \left\lfloor C \cdot \left(1 - \frac{r}{n_{\text{sel}}}\right) \right\rfloor\right)
+    \label{eq:cloni}
+\end{equation}
+
+dove $C = 10$ è il \emph{clone factor}. Questa formula garantisce che il miglior anticorpo ($r=1$) generi circa $C \cdot (1 - 1/n_{\text{sel}}) \approx C$ cloni, mentre l'anticorpo peggiore selezionato ($r = n_{\text{sel}}$) generi esattamente 1 clone. Il parametro $\beta = 0.2$ è stato scelto in modo che la selezione sia fortemente elitista: solo il 20\% della popolazione contribuisce alla generazione di nuovi candidati, concentrando le risorse computazionali sulle regioni più promettenti dello spazio di ricerca. Un valore di $\beta$ maggiore avrebbe disperso troppo le risorse; un valore minore avrebbe ridotto eccessivamente la diversità dei cloni.
+
+\subsubsection{Ipermutazione Inversamente Proporzionale all'Affinità}
+
+Il tasso di mutazione $\alpha$ per i cloni di un anticorpo con affinità normalizzata $\hat{f} \in [0, 1]$ (dove $\hat{f} = 1$ indica la soluzione migliore) è calcolato come:
+
+\begin{equation}
+    \alpha = \exp(-\rho \cdot \hat{f})
+    \label{eq:alpha}
+\end{equation}
+
+dove $\rho = 0.5$ è il \emph{fattore di scala}. L'\textbf{affinità normalizzata} $\hat{f}$ è calcolata come:
+\begin{equation}
+    \hat{f}_i = \frac{f_{\max} - f_i}{f_{\max} - f_{\min}}
+\end{equation}
+dove $f_i$ è il costo della soluzione $i$, e $f_{\min}$, $f_{\max}$ sono rispettivamente il costo minimo e massimo nella popolazione corrente. Questa normalizzazione garantisce che $\hat{f} \in [0, 1]$ indipendentemente dalla scala assoluta dei costi, rendendo il parametro $\rho$ trasferibile tra istanze di dimensioni diverse.
+
+La funzione esponenziale $\exp(-\rho \cdot \hat{f})$ è stata scelta per le seguenti proprietà:
+\begin{itemize}
+    \item Per $\hat{f} = 0$ (soluzione peggiore): $\alpha = 1$, ovvero intensità di mutazione massima.
+    \item Per $\hat{f} = 1$ (soluzione migliore): $\alpha = e^{-\rho} \approx 0.61$ con $\rho = 0.5$, ovvero mutazione moderata anche per i migliori anticorpi.
+    \item Il decadimento è graduato e continuo, evitando transizioni brusche.
+\end{itemize}
+
+Il valore $\alpha$ determina il numero di operatori di mutazione applicati sequenzialmente: viene calcolato $\lceil \alpha \cdot \alpha_{\max} \rceil$ dove $\alpha_{\max} = 5$, ottenendo un numero di mutazioni compreso tra 1 (per i migliori) e 5 (per i peggiori). Applicare più mutazioni in sequenza sullo stesso clone, senza chiamate intermedie a Split, è una scelta di efficienza computazionale: la valutazione della fitness avviene una sola volta al termine di tutte le perturbazioni.
 
 \subsubsection{Operatori di Ipermutazione}
 
-Sono stati implementati quattro operatori di mutazione a livello di permutazione, applicati senza valutazione intermedia della fitness per efficienza computazionale:
+Sono stati implementati quattro operatori di mutazione a livello di permutazione. La scelta di questi operatori è motivata dalla necessità di coprire \emph{diversi granuli di perturbazione}: dalla modifica locale (swap, inserzione) a quella globale (inversione, scramble), in modo che l'algoritmo possa operare efficacemente sia nelle fasi di intensificazione (pochi operatori locali su buone soluzioni) sia in quelle di esplorazione (operatori globali su soluzioni scadenti).
 
 \begin{enumerate}[label=\textbf{\arabic*.}, leftmargin=*]
-    \item \textbf{Swap}: scambia due posizioni casuali nella permutazione.
-    \item \textbf{Inversione}: inverte un segmento casuale della permutazione.
-    \item \textbf{Inserzione}: rimuove un elemento casuale e lo reinserisce in una posizione casuale.
-    \item \textbf{Scramble}: rimescola casualmente un sotto-segmento della permutazione.
+    \item \textbf{Swap}: scambia due clienti in posizioni casuali $i$ e $j$ della permutazione. È la perturbazione più piccola possibile (modifica $O(1)$ posizioni) ed è ideale per l'intensificazione locale: su soluzioni di alta qualità, piccoli scambi permettono di esplorare la vicinanza immediata senza allontanarsi troppo dalla soluzione corrente. Nel contesto CVRP, scambiare due clienti vicini tende a modificare le rotte a cui appartengono, potenzialmente riducendo il costo di trasferimento.
+
+    \item \textbf{Inversione} (\emph{2-opt su permutazione}): inverte il sotto-segmento $\pi[i{:}j]$ della permutazione. L'inversione è ispirata all'operatore 2-opt classico per il TSP e permette di eliminare \emph{archi incrociati} nel giant tour. Nel CVRP, un'inversione di segmento può modificare contemporaneamente l'assegnazione di più clienti a rotte diverse, introducendo una perturbazione di media entità. È particolarmente efficace nella fase intermedia della ricerca.
+
+    \item \textbf{Inserzione}: rimuove il cliente in posizione $i$ e lo reinserisce in una posizione $j \neq i$ casuale. Questo operatore è equivalente alla mossa \emph{relocate} tipica delle meta-euristiche per VRP: sposta un singolo cliente da una posizione del tour a un'altra, simulando l'assegnazione di quel cliente a una rotta diversa. È un operatore di granularità intermedia, utile per correggere posizionamenti localmente subottimali di singoli clienti.
+
+    \item \textbf{Scramble}: rimescola casualmente il sotto-segmento $\pi[i{:}j]$. Questo operatore introduce la perturbazione più radicale: un intero blocco di clienti viene riordinato casualmente, distruggendo completamente la struttura locale in quella regione del tour. È l'operatore di esplorazione globale per eccellenza, usato principalmente quando $\alpha$ è elevato (soluzioni scadenti). Permette all'algoritmo di uscire da minimi locali profondi, a costo di perdere la struttura acquisita nel blocco perturbato.
 \end{enumerate}
 
-L'ipermutazione applica un numero di mutazioni proporzionale al tasso di mutazione $\alpha$, che varia tra 1 (per i migliori anticorpi) e 5 (per i peggiori). Una singola chiamata a \texttt{Split} viene eseguita solo alla fine di tutte le mutazioni.
+Nella implementazione, ad ogni applicazione di ipermutazione viene scelto uniformemente a caso quale dei quattro operatori applicare. Questa scelta è motivata dalla \emph{diversificazione della perturbazione}: operatori diversi hanno diversi raggi di influenza nel giant tour, e la loro combinazione casuale garantisce che l'algoritmo non si specializzi eccessivamente in un solo tipo di mossa.
 
-\subsubsection{Ricerca Locale 2-opt}
+\subsubsection{Ricerca Locale 2-opt Intra-Rotta}
 
-Dopo l'ipermutazione, i migliori $k = 10$ cloni vengono raffinati con una ricerca locale \textbf{2-opt intra-rotta} (first-improvement), che ottimizza ciascuna rotta indipendentemente scambiando coppie di archi. Questa fase \emph{non} consuma valutazioni di fitness aggiuntive.
+Dopo l'ipermutazione, i migliori $k = 10$ cloni (per valore di fitness) vengono raffinati con una ricerca locale \textbf{2-opt intra-rotta} con strategia \emph{first-improvement}. Per ciascuna rotta $\eta$ della soluzione decodificata, l'operatore 2-opt considera tutte le coppie di archi $(\eta_i, \eta_{i+1})$ e $(\eta_j, \eta_{j+1})$ e verifica se la loro inversione riduce il costo della rotta:
+\begin{equation}
+    \Delta = c_{\eta_i,\eta_j} + c_{\eta_{i+1},\eta_{j+1}} - c_{\eta_i,\eta_{i+1}} - c_{\eta_j,\eta_{j+1}}
+\end{equation}
+Se $\Delta < 0$, la mossa viene accettata (first-improvement) e la ricerca riparte dall'inizio della rotta. Il processo continua fino a che non si trovano miglioramenti.
+
+\paragraph{Perché la 2-opt non consuma valutazioni di fitness.} La valutazione di fitness nel nostro schema corrisponde a una chiamata all'algoritmo Split, che lavora sull'intera permutazione per produrre la partizione ottima in rotte. La 2-opt, invece, opera \emph{direttamente sulle rotte già decodificate} --- strutture che Split ha già calcolato --- modificando l'ordine dei clienti all'interno di ciascuna rotta senza mai ricostruire la partizione. Il costo di una mossa 2-opt è valutabile in $O(1)$ tramite la formula di $\Delta$ sopra, senza necessità di richiamare Split. Questa distinzione è fondamentale per giustificare la scelta di applicare la 2-opt solo ai migliori $k$ cloni: il suo costo computazionale è significativo (in termini di tempo), ma non incide sul budget di valutazioni di fitness $FE_{\max}$, permettendo di sfruttare tutto il budget per la generazione e valutazione di nuovi anticorpi.
+
+La scelta di $k = 10$ (su un pool di cloni tipicamente composto da $\sim$100--200 individui) bilancia il costo della ricerca locale con il beneficio atteso: applicarla a tutti i cloni sarebbe computazionalmente proibitivo, mentre limitarla ai soli migliori assicura che lo sforzo sia concentrato nelle regioni più promettenti.
+
+\subsection{Gestione della Diversità}
+
+Un rischio comune negli algoritmi evolutivi e immunologici è la \textbf{convergenza prematura}: la popolazione tende a convergere verso un unico ottimo locale, perdendo la capacità di esplorare regioni alternative dello spazio di ricerca. CLONALG affronta questo problema con due meccanismi complementari.
+
+\paragraph{Rimozione dei duplicati.} Dopo ogni generazione, le soluzioni duplicate (permutazioni identiche) vengono eliminate dalla popolazione prima della selezione dei migliori $N$ individui. Questo incentiva la presenza di soluzioni diverse nella popolazione e riduce lo spreco di risorse computazionali su anticorpi equivalenti.
+
+\paragraph{Sostituzione casuale.} Al termine di ogni generazione, i peggiori $\lfloor r \cdot N \rfloor$ anticorpi della popolazione (con $r = 0.2$, ovvero il 20\% della popolazione) vengono sostituiti con permutazioni generate casualmente. Questo meccanismo è ispirato al processo biologico di \emph{maturazione dell'affinità}: i linfociti B con bassa affinità per l'antigene vengono eliminati e rimpiazzati da nuovi linfociti naïve. In termini algoritmici, questa sostituzione introduce continuamente nuova diversità genetica nella popolazione, prevenendo la stagnazione e permettendo all'algoritmo di esplorare regioni dello spazio che la sola selezione clonale non raggiungerebbe.
+
+Il valore $r = 0.2$ è stato scelto come compromesso: un tasso di sostituzione più alto avrebbe perturbato eccessivamente la popolazione, rallentando la convergenza; un tasso più basso avrebbe reso insufficiente il contributo alla diversità.
 
 \subsection{Pseudocodice}
 
 \begin{algorithm}[H]
 \caption{CLONALG per CVRP}
 \begin{algorithmic}[1]
-\State \textbf{Input}: Istanza CVRP, parametri ($N$, $\beta$, $\rho$, $r$, $k$, $FE_{\max}$)
-\State \textbf{Output}: Migliore soluzione trovata
-\State Genera popolazione iniziale $P$ di $N$ anticorpi casuali
-\State Valuta affinità di ogni anticorpo (\texttt{Split})
-\State $S^* \gets$ migliore anticorpo in $P$
-\State $FE \gets N$
+\State \textbf{Input}: Istanza CVRP, parametri ($N$, $\beta$, $C$, $\rho$, $r$, $k$, $FE_{\max}$)
+\State \textbf{Output}: Migliore soluzione trovata $S^*$
+\State Genera popolazione iniziale $P$ di $N$ anticorpi casuali (permutazioni)
+\State Valuta affinità di ogni anticorpo tramite \texttt{Split}; $FE \gets N$
+\State $S^* \gets \arg\min_{p \in P} \text{costo}(p)$
 \While{$FE < FE_{\max}$}
-    \State Seleziona i migliori $\lfloor \beta N \rfloor$ anticorpi
-    \For{ogni anticorpo selezionato (rank $r$)}
-        \State $n_{\text{cloni}} \gets \max(1, \lfloor C \cdot (1 - r/n_{\text{sel}}) \rfloor)$
-        \State $\alpha \gets \exp(-\rho \cdot \text{affinità\_norm})$
+    \State $n_{\text{sel}} \gets \lfloor \beta N \rfloor$; seleziona i migliori $n_{\text{sel}}$ anticorpi
+    \State Calcola $\hat{f}_i \in [0,1]$ per ogni anticorpo selezionato (normalizzazione)
+    \For{ogni anticorpo selezionato con rank $r = 1, \dots, n_{\text{sel}}$}
+        \State $n_{\text{cloni}} \gets \max(1, \lfloor C \cdot (1 - r/n_{\text{sel}}) \rfloor)$ \Comment{Eq.~\ref{eq:cloni}}
+        \State $\alpha \gets \exp(-\rho \cdot \hat{f}_r)$ \Comment{Eq.~\ref{eq:alpha}}
         \For{$i = 1$ \textbf{to} $n_{\text{cloni}}$}
-            \State Applica ipermutazione con tasso $\alpha$
-            \State Valuta clone (\texttt{Split}); $FE \gets FE + 1$
+            \State Copia il genitore; applica $\lceil \alpha \cdot 5 \rceil$ operatori di mutazione casuali
+            \State Valuta clone con \texttt{Split}; $FE \gets FE + 1$
         \EndFor
     \EndFor
-    \State Applica 2-opt intra-rotta ai migliori $k$ cloni
-    \State Unisci popolazione $P$ e cloni, rimuovi duplicati
-    \State Seleziona i migliori $N$ per la nuova popolazione
+    \State Applica 2-opt intra-rotta ai migliori $k$ cloni (non incrementa $FE$)
+    \State Unisci $P$ e tutti i cloni; rimuovi permutazioni duplicate
+    \State Seleziona i migliori $N$ individui per la nuova popolazione $P$
     \State Sostituisci i peggiori $\lfloor r \cdot N \rfloor$ con nuovi anticorpi casuali
-    \State Aggiorna $S^*$ se necessario
+    \State $S^* \gets \arg\min(S^*,\ \min_{p \in P} \text{costo}(p))$
 \EndWhile
 \State \Return $S^*$
 \end{algorithmic}
@@ -245,19 +305,19 @@ La Figura~\ref{fig:convergence} mostra la convergenza dell'algoritmo su tre ista
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}{0.32\textwidth}
+\begin{subfigure}{0.48\textwidth}
     \centering
     \includegraphics[width=\textwidth]{images/A-n45-k7_convergence.png}
     \caption{A-n45-k7 (45 clienti)}
 \end{subfigure}
 \hfill
-\begin{subfigure}{0.32\textwidth}
+\begin{subfigure}{0.48\textwidth}
     \centering
     \includegraphics[width=\textwidth]{images/B-n78-k10_convergence.png}
     \caption{B-n78-k10 (78 clienti)}
 \end{subfigure}
-\hfill
-\begin{subfigure}{0.32\textwidth}
+\\[10pt]
+\begin{subfigure}{0.65\textwidth}
     \centering
     \includegraphics[width=\textwidth]{images/P-n101-k4_convergence.png}
     \caption{P-n101-k4 (101 clienti)}
