@@ -75,7 +75,7 @@ class ImmuneAlgorithm:
         pop_size: int = 100,
         clone_factor: float = 10.0,
         beta: float = 0.2,
-        rho: float = 3.0,
+        rho: float = 0.5,
         replacement_rate: float = 0.2,
         local_search_top_k: int = 10,
         max_fe: int = 350_000,
